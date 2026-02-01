@@ -31,15 +31,16 @@ use crate::query::{
     AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery,
     DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery,
     GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery,
-    GetEpisodeQuery, GetHistoryQuery, GetLibraryAlbumsQuery, GetLibraryArtistSubscriptionsQuery,
-    GetLibraryArtistsQuery, GetLibraryChannelsQuery, GetLibraryPlaylistsQuery,
-    GetLibraryPodcastsQuery, GetLibrarySongsQuery, GetLibraryUploadAlbumQuery,
-    GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery, GetLibraryUploadArtistsQuery,
-    GetLibraryUploadSongsQuery, GetLyricsIDQuery, GetMoodCategoriesQuery, GetMoodPlaylistsQuery,
-    GetNewEpisodesQuery, GetPlaylistTracksQuery, GetPodcastQuery, GetSearchSuggestionsQuery,
-    GetTasteProfileQuery, GetUserPlaylistsQuery, GetUserQuery, GetUserVideosQuery,
-    GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery, RemovePlaylistItemsQuery, SearchQuery,
-    SetTasteProfileQuery, SubscribeArtistQuery, UnsubscribeArtistsQuery,
+    GetEpisodeQuery, GetHistoryQuery, GetHomeQuery, GetLibraryAlbumsQuery,
+    GetLibraryArtistSubscriptionsQuery, GetLibraryArtistsQuery, GetLibraryChannelsQuery,
+    GetLibraryPlaylistsQuery, GetLibraryPodcastsQuery, GetLibrarySongsQuery,
+    GetLibraryUploadAlbumQuery, GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery,
+    GetLibraryUploadArtistsQuery, GetLibraryUploadSongsQuery, GetLyricsIDQuery,
+    GetMoodCategoriesQuery, GetMoodPlaylistsQuery, GetNewEpisodesQuery, GetPlaylistTracksQuery,
+    GetPodcastQuery, GetSearchSuggestionsQuery, GetTasteProfileQuery, GetUserPlaylistsQuery,
+    GetUserQuery, GetUserVideosQuery, GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery,
+    RemovePlaylistItemsQuery, SearchQuery, SetTasteProfileQuery, SubscribeArtistQuery,
+    UnsubscribeArtistsQuery,
 };
 use crate::{Result, YtMusic};
 
@@ -338,6 +339,17 @@ impl<A: AuthToken> YtMusic<A> {
     /// # };
     pub async fn get_taste_profile(&self) -> Result<<GetTasteProfileQuery as Query<A>>::Output> {
         self.query(GetTasteProfileQuery).await
+    }
+    /// Fetches the home page feed from YouTube Music.
+    /// The home page is structured as titled rows, returning sections of music suggestions.
+    /// Content varies and may contain artist, album, song or playlist suggestions, sometimes mixed within the same row.
+    /// ```no_run
+    /// # async {
+    /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
+    /// yt.get_home().await
+    /// # };
+    pub async fn get_home(&self) -> Result<<GetHomeQuery as Query<A>>::Output> {
+        self.query(GetHomeQuery::new()).await
     }
     /// Sets artists as favourites to influence your recommendations.
     /// ```no_run

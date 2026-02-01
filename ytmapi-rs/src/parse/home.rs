@@ -86,16 +86,13 @@ impl ParseFrom<GetHomeQuery> for Vec<HomeSection> {
     fn parse_from(p: ProcessedResult<GetHomeQuery>) -> Result<Self> {
         let json_crawler: JsonCrawlerOwned = p.into();
         let results = json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, SECTION_LIST))?;
-        
+
         parse_mixed_content(results)
     }
 }
 
 fn parse_mixed_content(results: JsonCrawlerOwned) -> Result<Vec<HomeSection>> {
-    results
-        .try_into_iter()?
-        .map(parse_home_section)
-        .collect()
+    results.try_into_iter()?.map(parse_home_section).collect()
 }
 
 fn parse_home_section(section: JsonCrawlerOwned) -> Result<HomeSection> {
@@ -115,7 +112,7 @@ fn parse_home_section(section: JsonCrawlerOwned) -> Result<HomeSection> {
             .try_into_iter()?
             .filter_map(|item| parse_home_content(item).transpose())
             .collect::<Result<Vec<_>>>()?;
-        
+
         Ok(HomeSection { title, contents })
     }
 }
@@ -124,9 +121,11 @@ fn parse_home_content(content: JsonCrawlerOwned) -> Result<Option<HomeContent>> 
     // Try to parse as MTRIR (musicTwoRowItemRenderer)
     if let Ok(mut data) = content.navigate_pointer(MTRIR) {
         // Check page type to determine content type
-        if let Ok(mut page_type) = data.borrow_pointer(concatcp!(TITLE, NAVIGATION_BROWSE, PAGE_TYPE)) {
+        if let Ok(mut page_type) =
+            data.borrow_pointer(concatcp!(TITLE, NAVIGATION_BROWSE, PAGE_TYPE))
+        {
             let page_type_str: String = page_type.take_value_pointer("/")?;
-            
+
             match page_type_str.as_str() {
                 "MUSIC_PAGE_TYPE_ALBUM" | "MUSIC_PAGE_TYPE_AUDIOBOOK" => {
                     Ok(Some(HomeContent::Album(parse_album(&mut data)?)))
@@ -144,7 +143,9 @@ fn parse_home_content(content: JsonCrawlerOwned) -> Result<Option<HomeContent>> 
             // Check if it has watchPlaylistId
             if data.borrow_pointer(NAVIGATION_WATCH_PLAYLIST_ID).is_ok() {
                 // It's a playlist (watch_playlist)
-                Ok(Some(HomeContent::Playlist(parse_watch_playlist(&mut data)?)))
+                Ok(Some(HomeContent::Playlist(parse_watch_playlist(
+                    &mut data,
+                )?)))
             } else {
                 // It's a song or video
                 Ok(Some(parse_song_or_video(&mut data)?))
@@ -161,12 +162,12 @@ fn parse_album(data: &mut impl JsonCrawler) -> Result<AlbumContent> {
     let browse_id = data.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
     let thumbnails = data.take_value_pointer(THUMBNAIL_RENDERER)?;
     let is_explicit = data.borrow_pointer(SUBTITLE_BADGE_LABEL).is_ok();
-    
+
     // Parse subtitle runs for artists and year
     let subtitle_runs = data.borrow_pointer(SUBTITLE_RUNS)?;
     let mut artists = Vec::new();
     let mut year = None;
-    
+
     for mut run in subtitle_runs.try_into_iter()? {
         if let Ok(browse_id) = run.take_value_pointer(NAVIGATION_BROWSE_ID) {
             let name = run.take_value_pointer("/text")?;
@@ -180,7 +181,7 @@ fn parse_album(data: &mut impl JsonCrawler) -> Result<AlbumContent> {
             }
         }
     }
-    
+
     Ok(AlbumContent {
         title,
         browse_id,
@@ -195,12 +196,12 @@ fn parse_artist(data: &mut impl JsonCrawler) -> Result<ArtistContent> {
     let title = data.take_value_pointer(TITLE_TEXT)?;
     let browse_id = data.take_value_pointer(NAVIGATION_BROWSE_ID)?;
     let thumbnails = data.take_value_pointer(THUMBNAIL_RENDERER)?;
-    
+
     let subscribers = data
         .take_value_pointer::<String>(SUBTITLE)
         .ok()
         .and_then(|s| s.split_whitespace().next().map(String::from));
-    
+
     Ok(ArtistContent {
         title,
         browse_id,
@@ -219,18 +220,18 @@ fn parse_playlist(data: &mut impl JsonCrawler) -> Result<PlaylistContent> {
         browse_id
     };
     let thumbnails = data.take_value_pointer(THUMBNAIL_RENDERER)?;
-    
+
     let mut description = None;
     let mut count = None;
     let mut author = Vec::new();
-    
+
     if let Ok(mut subtitle) = data.borrow_pointer("/subtitle") {
         if let Ok(mut runs) = subtitle.borrow_pointer("/runs") {
             let mut full_desc = String::new();
             for mut run in runs.try_iter_mut()? {
                 let text: String = run.take_value_pointer("/text")?;
                 full_desc.push_str(&text);
-                
+
                 // Try to parse author
                 if let Ok(browse_id) = run.take_value_pointer(NAVIGATION_BROWSE_ID) {
                     author.push(Artist {
@@ -240,7 +241,7 @@ fn parse_playlist(data: &mut impl JsonCrawler) -> Result<PlaylistContent> {
                 }
             }
             description = Some(full_desc);
-            
+
             // Try to extract count from description
             if let Some(parts) = description.as_ref().and_then(|d| d.split(" • ").nth(1)) {
                 if let Some(num) = parts.split_whitespace().next() {
@@ -249,7 +250,7 @@ fn parse_playlist(data: &mut impl JsonCrawler) -> Result<PlaylistContent> {
             }
         }
     }
-    
+
     Ok(PlaylistContent {
         title: title.unwrap_or_default(),
         playlist_id,
@@ -264,7 +265,7 @@ fn parse_watch_playlist(data: &mut impl JsonCrawler) -> Result<PlaylistContent> 
     let title = data.take_value_pointer(TITLE_TEXT)?;
     let playlist_id = data.take_value_pointer(NAVIGATION_WATCH_PLAYLIST_ID)?;
     let thumbnails = data.take_value_pointer(THUMBNAIL_RENDERER)?;
-    
+
     Ok(PlaylistContent {
         title,
         playlist_id,
@@ -279,13 +280,13 @@ fn parse_song_or_video(data: &mut impl JsonCrawler) -> Result<HomeContent> {
     let title: String = data.take_value_pointer(TITLE_TEXT)?;
     let video_id: String = data.take_value_pointer(NAVIGATION_VIDEO_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
-    
+
     // Parse subtitle runs for artists and other info
     let mut subtitle_runs = data.borrow_pointer(SUBTITLE_RUNS)?;
     let mut artists = Vec::new();
     let mut album = None;
     let mut views = None;
-    
+
     // Collect all runs first
     let mut all_runs: Vec<(String, Option<String>)> = Vec::new();
     for mut run in subtitle_runs.try_iter_mut()? {
@@ -293,7 +294,7 @@ fn parse_song_or_video(data: &mut impl JsonCrawler) -> Result<HomeContent> {
         let browse_id: Option<String> = run.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
         all_runs.push((text, browse_id));
     }
-    
+
     // Find dot separator to determine where artists end
     let mut dot_idx = all_runs.len();
     for (i, (text, _)) in all_runs.iter().enumerate() {
@@ -302,7 +303,7 @@ fn parse_song_or_video(data: &mut impl JsonCrawler) -> Result<HomeContent> {
             break;
         }
     }
-    
+
     // Parse artists (before dot)
     for (text, browse_id) in all_runs.iter().take(dot_idx) {
         if let Some(id) = browse_id {
@@ -312,14 +313,14 @@ fn parse_song_or_video(data: &mut impl JsonCrawler) -> Result<HomeContent> {
             });
         }
     }
-    
+
     // Last item after dot is usually views
     if let Some((text, _)) = all_runs.last() {
         if text.contains(" views") || text.contains("M") || text.contains("K") {
             views = Some(text.split_whitespace().next().unwrap_or(text).to_string());
         }
     }
-    
+
     // Check if there's an album (usually between artists and views)
     if dot_idx + 2 < all_runs.len() {
         let (name, browse_id) = &all_runs[dot_idx + 1];
@@ -330,7 +331,7 @@ fn parse_song_or_video(data: &mut impl JsonCrawler) -> Result<HomeContent> {
             });
         }
     }
-    
+
     // Determine if it's a song or video based on presence of album
     if album.is_some() {
         Ok(HomeContent::Song(SongContent {
