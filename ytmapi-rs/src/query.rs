@@ -53,6 +53,9 @@ pub use continuations::GetContinuationsQuery;
 pub mod history;
 #[doc(inline)]
 pub use history::{AddHistoryItemQuery, GetHistoryQuery, RemoveHistoryItemsQuery};
+pub mod home;
+#[doc(inline)]
+pub use home::GetHomeQuery;
 pub mod library;
 #[doc(inline)]
 pub use library::{

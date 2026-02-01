@@ -36,6 +36,8 @@ mod artist;
 pub use artist::*;
 mod history;
 pub use history::*;
+mod home;
+pub use home::*;
 mod library;
 pub use library::*;
 mod playlist;
