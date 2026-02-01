@@ -176,7 +176,9 @@ fn parse_album(data: &mut impl JsonCrawler) -> Result<AlbumContent> {
                 id: Some(browse_id),
             });
         } else if let Ok(text) = run.take_value_pointer::<String>("/text") {
-            if text.chars().all(|c| c.is_numeric()) {
+            let trimmed = text.trim();
+            // Check if it's a year (4 digits)
+            if trimmed.len() == 4 && trimmed.chars().all(|c| c.is_numeric()) {
                 year = Some(text);
             }
         }

@@ -5,18 +5,11 @@ use serde_json::json;
 use std::borrow::Cow;
 
 #[derive(Clone)]
-pub struct GetHomeQuery {
-    limit: usize,
-}
+pub struct GetHomeQuery;
 
 impl GetHomeQuery {
     pub fn new() -> Self {
-        Self { limit: 3 }
-    }
-
-    pub fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = limit;
-        self
+        Self
     }
 }
 
