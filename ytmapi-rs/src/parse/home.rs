@@ -88,10 +88,11 @@ impl ParseFromContinuable<GetHomeQuery> for Vec<HomeSection> {
         p: ProcessedResult<GetHomeQuery>,
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
         let json_crawler: JsonCrawlerOwned = p.into();
-        let section_list =
+        // Navigate to the section list renderer which contains both contents and continuations
+        let section_list_renderer =
             json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, "/sectionListRenderer"))?;
 
-        parse_home_sections(section_list)
+        parse_home_sections(section_list_renderer)
     }
 
     fn parse_continuation(
@@ -99,21 +100,23 @@ impl ParseFromContinuable<GetHomeQuery> for Vec<HomeSection> {
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
         let json_crawler: JsonCrawlerOwned = p.into();
         // For continuations, the path is different
-        let section_list =
+        let section_list_continuation =
             json_crawler.navigate_pointer("/continuationContents/sectionListContinuation")?;
 
-        parse_home_sections(section_list)
+        parse_home_sections(section_list_continuation)
     }
 }
 
 fn parse_home_sections(
-    mut section_list: JsonCrawlerOwned,
+    mut section_list_renderer: JsonCrawlerOwned,
 ) -> Result<(Vec<HomeSection>, Option<ContinuationParams<'static>>)> {
-    // Extract continuation params first
-    let continuation_params = section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
+    // Extract continuation params first (at the renderer level)
+    let continuation_params = section_list_renderer
+        .take_value_pointer(CONTINUATION_PARAMS)
+        .ok();
 
-    // Parse the sections
-    let results = section_list.navigate_pointer("/contents")?;
+    // Parse the sections (from the contents array)
+    let results = section_list_renderer.navigate_pointer("/contents")?;
     let sections = parse_mixed_content(results)?;
 
     Ok((sections, continuation_params))
