@@ -1,8 +1,9 @@
-use super::{ParseFrom, ProcessedResult};
+use super::ProcessedResult;
 use crate::Result;
-use crate::common::Thumbnail;
+use crate::common::{ContinuationParams, Thumbnail};
+use crate::continuations::ParseFromContinuable;
 use crate::nav_consts::*;
-use crate::query::GetHomeQuery;
+use crate::query::{GetContinuationsQuery, GetHomeQuery};
 use const_format::concatcp;
 use json_crawler::{JsonCrawler, JsonCrawlerOwned};
 use serde::{Deserialize, Serialize};
@@ -82,13 +83,40 @@ pub struct AlbumReference {
     pub id: String,
 }
 
-impl ParseFrom<GetHomeQuery> for Vec<HomeSection> {
-    fn parse_from(p: ProcessedResult<GetHomeQuery>) -> Result<Self> {
+impl ParseFromContinuable<GetHomeQuery> for Vec<HomeSection> {
+    fn parse_from_continuable(
+        p: ProcessedResult<GetHomeQuery>,
+    ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
         let json_crawler: JsonCrawlerOwned = p.into();
-        let results = json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, SECTION_LIST))?;
+        let section_list =
+            json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, "/sectionListRenderer"))?;
 
-        parse_mixed_content(results)
+        parse_home_sections(section_list)
     }
+
+    fn parse_continuation(
+        p: ProcessedResult<GetContinuationsQuery<'_, GetHomeQuery>>,
+    ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
+        let json_crawler: JsonCrawlerOwned = p.into();
+        // For continuations, the path is different
+        let section_list =
+            json_crawler.navigate_pointer("/continuationContents/sectionListContinuation")?;
+
+        parse_home_sections(section_list)
+    }
+}
+
+fn parse_home_sections(
+    mut section_list: JsonCrawlerOwned,
+) -> Result<(Vec<HomeSection>, Option<ContinuationParams<'static>>)> {
+    // Extract continuation params first
+    let continuation_params = section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
+
+    // Parse the sections
+    let results = section_list.navigate_pointer("/contents")?;
+    let sections = parse_mixed_content(results)?;
+
+    Ok((sections, continuation_params))
 }
 
 fn parse_mixed_content(results: JsonCrawlerOwned) -> Result<Vec<HomeSection>> {

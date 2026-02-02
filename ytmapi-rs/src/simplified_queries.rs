@@ -343,13 +343,27 @@ impl<A: AuthToken> YtMusic<A> {
     /// Fetches the home page feed from YouTube Music.
     /// The home page is structured as titled rows, returning sections of music suggestions.
     /// Content varies and may contain artist, album, song or playlist suggestions, sometimes mixed within the same row.
+    ///
+    /// # Arguments
+    /// * `limit` - Optional limit on the number of sections to return. If None, returns all available sections from the first page.
+    ///
     /// ```no_run
     /// # async {
     /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
-    /// yt.get_home().await
+    /// // Get home feed with no limit (first page)
+    /// yt.get_home(None).await?;
+    /// // Get home feed with limit of 3 sections
+    /// yt.get_home(Some(3)).await
     /// # };
-    pub async fn get_home(&self) -> Result<<GetHomeQuery as Query<A>>::Output> {
-        self.query(GetHomeQuery::new()).await
+    pub async fn get_home(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<<GetHomeQuery as Query<A>>::Output> {
+        let mut query = GetHomeQuery::new();
+        if let Some(limit) = limit {
+            query = query.with_limit(limit);
+        }
+        self.query(query).await
     }
     /// Sets artists as favourites to influence your recommendations.
     /// ```no_run
