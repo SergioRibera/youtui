@@ -11,49 +11,21 @@ Estás implementando un cliente para YouTube Music en Rust. Ya existen implement
 
 Tengo estos tipos sugeridos para el home:
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct HomeSection { pub title: String, pub contents: Vec<HomeContent>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] #[serde(tag = "type", rename_all = "snake_case")] pub enum HomeContent { Album(AlbumContent), Playlist(PlaylistContent), Artist(ArtistContent), Song(SongContent), Video(VideoContent), }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct AlbumContent { pub title: String, pub browse_id: Option<String>, pub thumbnails: Vec<Thumbnail>, pub year: Option<String>, pub artists: Vec<Artist>, pub is_explicit: bool, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct PlaylistContent { pub title: String, pub playlist_id: String, pub thumbnails: Vec<Thumbnail>, pub description: Option<String>, pub count: Option<String>, pub author: Vec<Artist>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct ArtistContent { pub title: String, pub browse_id: String, pub subscribers: Option<String>, pub thumbnails: Vec<Thumbnail>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct SongContent { pub title: String, pub video_id: String, pub artists: Vec<Artist>, pub thumbnails: Vec<Thumbnail>, pub album: Option<AlbumReference>, pub views: Option<String>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct VideoContent { pub title: String, pub video_id: String, pub artists: Vec<Artist>, pub thumbnails: Vec<Thumbnail>, pub views: Option<String>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct Artist { pub name: String, pub id: Option<String>, }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct AlbumReference { pub name: String, pub id: String, }
+pub struct HomeSection { pub title: String, pub contents: Vec<HomeContent>, }
+pub enum HomeContent { Album(AlbumContent), Playlist(PlaylistContent), Artist(ArtistContent), Song(SongContent), Video(VideoContent), }
+pub struct AlbumContent { pub title: String, pub browse_id: Option<String>, pub thumbnails: Vec<Thumbnail>, pub year: Option<String>, pub artists: Vec<Artist>, pub is_explicit: bool, }
+pub struct PlaylistContent { pub title: String, pub playlist_id: String, pub thumbnails: Vec<Thumbnail>, pub description: Option<String>, pub count: Option<String>, pub author: Vec<Artist>, }
+pub struct ArtistContent { pub title: String, pub browse_id: String, pub subscribers: Option<String>, pub thumbnails: Vec<Thumbnail>, }
+pub struct SongContent { pub title: String, pub video_id: String, pub artists: Vec<Artist>, pub thumbnails: Vec<Thumbnail>, pub album: Option<AlbumReference>, pub views: Option<String>, }
+pub struct VideoContent { pub title: String, pub video_id: String, pub artists: Vec<Artist>, pub thumbnails: Vec<Thumbnail>, pub views: Option<String>, }
+pub struct Artist { pub name: String, pub id: Option<String>, }
+pub struct AlbumReference { pub name: String, pub id: String, }
 ```
 
 Con estas referencias en python en las que quiero que te bases
 
 mixins/browsing.py
 ```py
-import re
-import warnings
-from typing import Any, Literal, overload
-
-from ytmusicapi.continuations import (
-    get_continuations,
-    get_reloadable_continuation_params,
-)
-from ytmusicapi.helpers import YTM_DOMAIN, sum_total_duration
-from ytmusicapi.models.lyrics import LyricLine, Lyrics, TimedLyrics
-from ytmusicapi.parsers.albums import parse_album_header_2024
-from ytmusicapi.parsers.browsing import (
-    parse_album,
-    parse_content_list,
-    parse_mixed_content,
-    parse_playlist,
-    parse_video,
-)
-from ytmusicapi.parsers.library import parse_albums
-from ytmusicapi.parsers.playlists import parse_playlist_items
-from ytmusicapi.type_alias import JsonDict, JsonList, ParseFuncType, RequestFuncType
-
-from ..exceptions import YTMusicError, YTMusicUserError
-from ..navigation import *
-from ._protocol import MixinProtocol
-from ._utils import get_datestamp
-
-
 class BrowsingMixin(MixinProtocol):
     def get_home(self, limit: int = 3) -> JsonList:
         """
@@ -63,82 +35,6 @@ class BrowsingMixin(MixinProtocol):
 
         :param limit: Number of rows on the home page to return
         :return: List of dictionaries keyed with 'title' text and 'contents' list
-
-        Example list::
-
-            [
-                {
-                    "title": "Your morning music",
-                    "contents": [
-                        { //album result
-                            "title": "Sentiment",
-                            "browseId": "MPREb_QtqXtd2xZMR",
-                            "thumbnails": [...]
-                        },
-                        { //playlist result
-                            "title": "r/EDM top submissions 01/28/2022",
-                            "playlistId": "PLz7-xrYmULdSLRZGk-6GKUtaBZcgQNwel",
-                            "thumbnails": [...],
-                            "description": "redditEDM • 161 songs",
-                            "count": "161",
-                            "author": [
-                                {
-                                    "name": "redditEDM",
-                                    "id": "UCaTrZ9tPiIGHrkCe5bxOGwA"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "title": "Your favorites",
-                    "contents": [
-                        { //artist result
-                            "title": "Chill Satellite",
-                            "browseId": "UCrPLFBWdOroD57bkqPbZJog",
-                            "subscribers": "374",
-                            "thumbnails": [...]
-                        }
-                        { //album result
-                            "title": "Dragon",
-                            "year": "Two Steps From Hell",
-                            "browseId": "MPREb_M9aDqLRbSeg",
-                            "thumbnails": [...]
-                        }
-                    ]
-                },
-                {
-                    "title": "Quick picks",
-                    "contents": [
-                        { //song quick pick
-                            "title": "Gravity",
-                            "videoId": "EludZd6lfts",
-                            "artists": [{
-                                    "name": "yetep",
-                                    "id": "UCSW0r7dClqCoCvQeqXiZBlg"
-                                }],
-                            "thumbnails": [...],
-                            "album": {
-                                "name": "Gravity",
-                                "id": "MPREb_D6bICFcuuRY"
-                            }
-                        },
-                        { //video quick pick
-                            "title": "Gryffin & Illenium (feat. Daya) - Feel Good (L3V3LS Remix)",
-                            "videoId": "bR5l0hJDnX8",
-                            "artists": [
-                                {
-                                    "name": "L3V3LS",
-                                    "id": "UCCVNihbOdkOWw_-ajIYhAbQ"
-                                }
-                            ],
-                            "thumbnails": [...],
-                            "views": "10M"
-                        }
-                    ]
-                }
-            ]
-
         """
         endpoint = "browse"
         body = {"browseId": "FEmusic_home"}
@@ -165,57 +61,8 @@ class BrowsingMixin(MixinProtocol):
         return home
 ```
 
-mixins/_protocol.py
-```py
-"""protocol that defines the functions available to mixins"""
-
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Protocol
-
-from requests import Response
-from requests.structures import CaseInsensitiveDict
-
-from ytmusicapi.auth.types import AuthType
-from ytmusicapi.parsers.i18n import Parser
-from ytmusicapi.type_alias import JsonDict
-
-
-class MixinProtocol(Protocol):
-    """protocol that defines the functions available to mixins"""
-
-    auth_type: AuthType
-
-    parser: Parser
-
-    proxies: dict[str, str] | None
-
-    def _check_auth(self) -> None:
-        """checks if self has authentication"""
-
-    def _send_request(self, endpoint: str, body: JsonDict, additionalParams: str = "") -> JsonDict:
-        """for sending post requests to YouTube Music"""
-
-    def _send_get_request(self, url: str, params: JsonDict | None = None) -> Response:
-        """for sending get requests to YouTube Music"""
-
-    @contextmanager
-    def as_mobile(self) -> Iterator[None]:
-        """context-manager, that allows requests as the YouTube Music Mobile-App"""
-
-    @property
-    def headers(self) -> CaseInsensitiveDict[str]:
-        """property for getting request headers"""
-```
-
 navigation.py
 ```py
-"""commonly used navigation paths"""
-
-from typing import Any, Literal, overload
-
-from ytmusicapi.type_alias import JsonDict, JsonList
-
 CONTENT = ["contents", 0]
 RUN_TEXT = ["runs", 0, "text"]
 TAB_CONTENT = ["tabs", 0, "tabRenderer", "content"]
@@ -274,7 +121,6 @@ THUMBNAIL_RENDERER = ["thumbnailRenderer", "musicThumbnailRenderer", *THUMBNAIL]
 THUMBNAIL_OVERLAY_NAVIGATION = ["thumbnailOverlay", *OVERLAY_RENDERER, "playNavigationEndpoint"]
 THUMBNAIL_OVERLAY = [*THUMBNAIL_OVERLAY_NAVIGATION, *WATCH_PID]
 THUMBNAIL_CROPPED = ["thumbnail", "croppedSquareThumbnailRenderer", *THUMBNAIL]
-FEEDBACK_TOKEN = ["feedbackEndpoint", "feedbackToken"]
 BADGE_PATH = [0, "musicInlineBadgeRenderer", "accessibilityData", "accessibilityData", "label"]
 BADGE_LABEL = ["badges", *BADGE_PATH]
 SUBTITLE_BADGE_LABEL = ["subtitleBadges", *BADGE_PATH]
@@ -302,17 +148,6 @@ IMMERSIVE_CAROUSEL = ["musicImmersiveCarouselShelfRenderer"]
 CAROUSEL_CONTENTS = [*CAROUSEL, "contents"]
 CAROUSEL_TITLE = [*HEADER, "musicCarouselShelfBasicHeaderRenderer", *TITLE]
 CARD_SHELF_TITLE = [*HEADER, "musicCardShelfHeaderBasicRenderer", *TITLE_TEXT]
-FRAMEWORK_MUTATIONS = ["frameworkUpdates", "entityBatchUpdate", "mutations"]
-TIMESTAMPED_LYRICS = [
-    "contents",
-    "elementRenderer",
-    "newElement",
-    "type",
-    "componentType",
-    "model",
-    "timedLyricsModel",
-    "lyricsData",
-]
 
 
 @overload
@@ -363,16 +198,6 @@ def find_objects_by_key(object_list: JsonList, key: str, nested: str | None = No
 
 parsers/browing.py
 ```py
-import re
-
-from ytmusicapi.type_alias import JsonDict, JsonList, ParseFuncDictType
-
-from .albums import parse_album_playlistid_if_exists
-from .artists import parse_artists_runs
-from .podcasts import parse_episode, parse_podcast
-from .songs import *
-
-
 def parse_mixed_content(
     rows: JsonList,
 ) -> JsonList:
@@ -551,14 +376,6 @@ def parse_watch_playlist(data: JsonDict) -> JsonDict:
 
 parsers/albums.py
 ```py
-from ytmusicapi.helpers import to_int
-from ytmusicapi.type_alias import JsonDict
-
-from ._utils import *
-from .artists import parse_artists_runs
-from .songs import parse_like_status, parse_song_runs
-
-
 def parse_album_header(response: JsonDict) -> JsonDict:
     header = nav(response, HEADER_DETAIL)
     album = {
@@ -662,13 +479,6 @@ def parse_artists_runs(runs: JsonList) -> JsonList:
 
 parsers/podcasts.py
 ```py
-from dataclasses import dataclass
-from typing import Any
-
-from ytmusicapi.type_alias import JsonDict, JsonList
-
-from .songs import *
-
 PROGRESS_RENDERER = ["musicPlaybackProgressRenderer"]
 DURATION_TEXT = ["durationText", "runs", 1, "text"]
 
@@ -702,12 +512,6 @@ class Description(list[DescriptionElement]):
 
     @classmethod
     def from_runs(cls, description_runs: JsonList) -> "Description":
-        """parse the description runs into a usable format
-
-        :param description_runs: the original description runs
-
-        :return: List of text (str), timestamp (int) and link values (Link object)
-        """
         elements: list[DescriptionElement] = []
         for run in description_runs:
             navigationEndpoint = nav(run, ["navigationEndpoint"], True)
@@ -729,7 +533,6 @@ class Description(list[DescriptionElement]):
 
 
 def parse_base_header(header: JsonDict) -> JsonDict:
-    """parse common left hand side (header) items of an episode or podcast page"""
     strapline = nav(header, ["straplineTextOne"])
 
     author = {
@@ -819,16 +622,6 @@ def parse_podcast(data: JsonDict) -> JsonDict:
 
 parsers/songs.py
 ```py
-import re
-from collections.abc import Callable
-
-from ytmusicapi.type_alias import JsonDict, JsonList
-
-from ._utils import *
-from .artists import parse_artists_runs
-from .constants import DOT_SEPARATOR_RUN
-
-
 def parse_song_artists(data: JsonDict, index: int) -> JsonList:
     flex_item = get_flex_column_item(data, index)
     if not flex_item:
@@ -913,21 +706,6 @@ def parse_song_album(data: JsonDict, index: int) -> JsonDict | None:
 def parse_song_menu_data(data: JsonDict) -> JsonDict:
     """
     :return: Dictionary with data from the provided song's context menu.
-
-    Example::
-
-        {
-            "inLibrary": true,
-            "feedbackTokens": {
-                "add": "...",
-                "remove": "..."
-            },
-            "pinnedToListenAgain": true,
-            "listenAgainFeedbackTokens": {
-                "pin": "...",
-                "unpin": "..."
-            }
-        }
     """
 
     if "menu" not in data:
