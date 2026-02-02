@@ -13,11 +13,7 @@ use crate::common::{
     UploadArtistID, UploadEntityID, UserChannelID, UserPlaylistsParams, UserVideosParams, VideoID,
 };
 use crate::parse::{
-    AddPlaylistItem, GetAlbum, GetArtist, GetArtistAlbumsAlbum, GetPlaylistDetails, GetUser,
-    HistoryPeriod, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics, PlaylistItem,
-    SearchResultAlbum, SearchResultArtist, SearchResultEpisode, SearchResultFeaturedPlaylist,
-    SearchResultPlaylist, SearchResultPodcast, SearchResultProfile, SearchResultSong,
-    SearchResultVideo, SearchResults, UserPlaylist, UserVideo, WatchPlaylistTrack,
+    AddPlaylistItem, GetAlbum, GetArtist, GetArtistAlbumsAlbum, GetPlaylistDetails, GetUser, HistoryPeriod, HomeSections, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics, PlaylistItem, SearchResultAlbum, SearchResultArtist, SearchResultEpisode, SearchResultFeaturedPlaylist, SearchResultPlaylist, SearchResultPodcast, SearchResultProfile, SearchResultSong, SearchResultVideo, SearchResults, UserPlaylist, UserVideo, WatchPlaylistTrack
 };
 use crate::query::playlist::{CreatePlaylistType, DuplicateHandlingMode, GetPlaylistDetailsQuery};
 use crate::query::rate::{RatePlaylistQuery, RateSongQuery};
@@ -28,18 +24,7 @@ use crate::query::search::filteredsearch::{
 };
 use crate::query::song::{GetLyricsQuery, GetSongTrackingUrlQuery};
 use crate::query::{
-    AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery,
-    DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery,
-    GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery,
-    GetEpisodeQuery, GetHistoryQuery, GetLibraryAlbumsQuery, GetLibraryArtistSubscriptionsQuery,
-    GetLibraryArtistsQuery, GetLibraryChannelsQuery, GetLibraryPlaylistsQuery,
-    GetLibraryPodcastsQuery, GetLibrarySongsQuery, GetLibraryUploadAlbumQuery,
-    GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery, GetLibraryUploadArtistsQuery,
-    GetLibraryUploadSongsQuery, GetLyricsIDQuery, GetMoodCategoriesQuery, GetMoodPlaylistsQuery,
-    GetNewEpisodesQuery, GetPlaylistTracksQuery, GetPodcastQuery, GetSearchSuggestionsQuery,
-    GetTasteProfileQuery, GetUserPlaylistsQuery, GetUserQuery, GetUserVideosQuery,
-    GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery, RemovePlaylistItemsQuery, SearchQuery,
-    SetTasteProfileQuery, SubscribeArtistQuery, UnsubscribeArtistsQuery,
+    AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery, DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery, GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery, GetEpisodeQuery, GetHistoryQuery, GetHomeQuery, GetLibraryAlbumsQuery, GetLibraryArtistSubscriptionsQuery, GetLibraryArtistsQuery, GetLibraryChannelsQuery, GetLibraryPlaylistsQuery, GetLibraryPodcastsQuery, GetLibrarySongsQuery, GetLibraryUploadAlbumQuery, GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery, GetLibraryUploadArtistsQuery, GetLibraryUploadSongsQuery, GetLyricsIDQuery, GetMoodCategoriesQuery, GetMoodPlaylistsQuery, GetNewEpisodesQuery, GetPlaylistTracksQuery, GetPodcastQuery, GetSearchSuggestionsQuery, GetTasteProfileQuery, GetUserPlaylistsQuery, GetUserQuery, GetUserVideosQuery, GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery, RemovePlaylistItemsQuery, SearchQuery, SetTasteProfileQuery, SubscribeArtistQuery, UnsubscribeArtistsQuery
 };
 use crate::{Result, YtMusic};
 
@@ -943,6 +928,9 @@ impl<A: LoggedIn> YtMusic<A> {
     pub async fn get_history(&self) -> Result<Vec<HistoryPeriod>> {
         let query = GetHistoryQuery;
         self.query(query).await
+    }
+    pub async fn get_home(&self) -> Result<HomeSections> {
+        self.query(GetHomeQuery).await
     }
     /// Adds an item to the accounts history.
     /// ```no_run
