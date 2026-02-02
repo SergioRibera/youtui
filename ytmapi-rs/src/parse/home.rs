@@ -1,15 +1,9 @@
+use std::ops::{Deref, DerefMut};
+
 use super::{ParsedSongAlbum, ParsedSongArtist, ProcessedResult};
-use crate::common::{
-    AlbumID, ArtistChannelID, ContinuationParams, Explicit, PlaylistID, Thumbnail, VideoID,
-    YoutubeID,
-};
+use crate::common::*;
 use crate::continuations::ParseFromContinuable;
-use crate::nav_consts::{
-    CAROUSEL, CONTINUATION_PARAMS, MTRIR, NAVIGATION_BROWSE, NAVIGATION_BROWSE_ID,
-    NAVIGATION_PLAYLIST_ID, NAVIGATION_VIDEO_ID, NAVIGATION_WATCH_PLAYLIST_ID, PAGE_TYPE,
-    SECTION_LIST, SINGLE_COLUMN_TAB, SUBTITLE, SUBTITLE2, SUBTITLE_BADGE_LABEL, SUBTITLE_RUNS,
-    THUMBNAIL_RENDERER, TITLE, TITLE_TEXT,
-};
+use crate::nav_consts::*;
 use crate::query::{GetContinuationsQuery, GetHomeQuery};
 use crate::youtube_enums::YoutubeMusicVideoType;
 use crate::Result;
@@ -22,32 +16,19 @@ const SECTION_LIST_CONTINUATION: &str = "/continuationContents/sectionListContin
 
 /// A collection of home sections returned from the home feed query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct HomeSections(pub Vec<HomeSection>);
+pub struct HomeSections(Vec<HomeSection>);
 
-impl HomeSections {
-    /// Returns the sections as a slice.
-    pub fn as_slice(&self) -> &[HomeSection] {
+impl Deref for HomeSections {
+    type Target = Vec<HomeSection>;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
+}
 
-    /// Returns an iterator over the sections.
-    pub fn iter(&self) -> impl Iterator<Item = &HomeSection> {
-        self.0.iter()
-    }
-
-    /// Returns the number of sections.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Returns true if there are no sections.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Consumes self and returns the inner Vec.
-    pub fn into_inner(self) -> Vec<HomeSection> {
-        self.0
+impl DerefMut for HomeSections {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

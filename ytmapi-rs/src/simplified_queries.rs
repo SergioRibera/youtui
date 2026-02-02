@@ -929,8 +929,20 @@ impl<A: LoggedIn> YtMusic<A> {
         let query = GetHistoryQuery;
         self.query(query).await
     }
-    pub async fn get_home(&self) -> Result<HomeSections> {
-        self.query(GetHomeQuery).await
+    /// Gets your home feed.
+    /// ```no_run
+    /// # async {
+    /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
+    /// let results = yt.get_limit(None).await;
+    /// # };
+    pub async fn get_home(&self, limit: Option<usize>) -> Result<HomeSections> {
+        let mut q = GetHomeQuery::default();
+
+        if let Some(limit) = limit {
+            q = q.with_limit(limit);
+        }
+
+        self.query(q).await
     }
     /// Adds an item to the accounts history.
     /// ```no_run
