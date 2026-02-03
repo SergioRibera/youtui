@@ -626,8 +626,6 @@ fn parse_album_from_subtitle_runs(data: &mut impl JsonCrawler) -> Result<Option<
 
 #[cfg(test)]
 mod tests {
-    use crate::auth::BrowserToken;
-
     #[tokio::test]
     async fn test_get_home_dummy_json() {
         // TODO: Add test JSON file when available
