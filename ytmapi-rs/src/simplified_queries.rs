@@ -929,20 +929,48 @@ impl<A: LoggedIn> YtMusic<A> {
         let query = GetHistoryQuery;
         self.query(query).await
     }
-    /// Gets your home feed.
+    /// Gets the home page feed from YouTube Music.
+    /// The home page is structured as titled sections, returning music suggestions.
+    /// Content varies and may contain artist, album, song, playlist or video suggestions,
+    /// sometimes mixed within the same section.
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of sections to return. If `None`, defaults to 3 sections.
+    ///   The method loads continuations until the limit is reached.
+    ///
+    /// # Example
     /// ```no_run
     /// # async {
     /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
-    /// let results = yt.get_limit(None).await;
+    /// // Get up to 10 sections from the home feed
+    /// let home = yt.get_home(Some(10)).await.unwrap();
+    /// for section in home.iter() {
+    ///     println!("Section: {}", section.title);
+    /// }
     /// # };
+    /// ```
     pub async fn get_home(&self, limit: Option<usize>) -> Result<HomeSections> {
-        let mut q = GetHomeQuery::default();
+        use futures::stream::StreamExt;
+        use std::pin::pin;
 
-        if let Some(limit) = limit {
-            q = q.with_limit(limit);
+        let limit = limit.unwrap_or(3);
+        let query = GetHomeQuery::default();
+        let mut stream = pin!(self.stream(&query));
+        let mut all_sections = HomeSections::default();
+
+        while let Some(result) = stream.next().await {
+            let sections = result?;
+            all_sections.extend(sections);
+
+            if all_sections.len() >= limit {
+                break;
+            }
         }
 
-        self.query(q).await
+        // Truncate to the requested limit
+        all_sections.truncate(limit);
+
+        Ok(all_sections)
     }
     /// Adds an item to the accounts history.
     /// ```no_run

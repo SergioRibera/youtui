@@ -18,6 +18,23 @@ const SECTION_LIST_CONTINUATION: &str = "/continuationContents/sectionListContin
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HomeSections(Vec<HomeSection>);
 
+impl HomeSections {
+    /// Creates a new `HomeSections` from a vector of sections.
+    pub fn new(sections: Vec<HomeSection>) -> Self {
+        Self(sections)
+    }
+
+    /// Extends this collection with sections from another `HomeSections`.
+    pub fn extend(&mut self, other: HomeSections) {
+        self.0.extend(other.0);
+    }
+
+    /// Truncates the sections to the given length.
+    pub fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+}
+
 impl Deref for HomeSections {
     type Target = Vec<HomeSection>;
 
