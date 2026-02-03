@@ -11,13 +11,8 @@ use const_format::concatcp;
 use json_crawler::{JsonCrawler, JsonCrawlerOwned};
 use serde::{Deserialize, Serialize};
 
-/// Constant for appendContinuationItemsAction path (used for home feed continuations)
-const APPEND_CONTINUATION_ITEMS: &str =
-    "/onResponseReceivedActions/0/appendContinuationItemsAction/continuationItems";
-
-/// Path to get continuation token from continuationItemRenderer
-const CONTINUATION_ITEM_TOKEN: &str =
-    "/continuationItemRenderer/continuationEndpoint/continuationCommand/token";
+/// Path for section list continuation response
+const SECTION_LIST_CONTINUATION: &str = "/continuationContents/sectionListContinuation";
 
 /// A collection of home sections returned from the home feed query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -189,22 +184,26 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
         let mut json_crawler: JsonCrawlerOwned = p.into();
 
-        // Navigate to continuation items (home feed uses appendContinuationItemsAction)
-        let mut continuation_items = json_crawler.borrow_pointer(APPEND_CONTINUATION_ITEMS)?;
+        // Try to navigate to section list continuation
+        // If this path doesn't exist, return empty results (end of stream)
+        // This matches Python's behavior: `if "continuationContents" in response`
+        let Ok(mut section_list) = json_crawler.borrow_pointer(SECTION_LIST_CONTINUATION) else {
+            return Ok((HomeSections::default(), None));
+        };
 
-        // Try to get continuation params from the last item (continuationItemRenderer)
-        // The continuation token is in the last item of the array
-        let continuation_params: Option<ContinuationParams<'static>> = continuation_items
-            .try_iter_mut()
-            .ok()
-            .and_then(|mut iter| {
-                iter.last()
-                    .and_then(|mut last| last.take_value_pointer(CONTINUATION_ITEM_TOKEN).ok())
-            });
+        // Get continuation params if present (for next page)
+        let continuation_params: Option<ContinuationParams<'static>> =
+            section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
 
-        // Parse the sections from continuation items
-        let sections =
-            parse_mixed_content(json_crawler.navigate_pointer(APPEND_CONTINUATION_ITEMS)?)?;
+        // Parse the sections from continuation contents
+        // Python uses get_continuation_contents which looks for "contents" or "items"
+        let sections = if let Ok(contents) =
+            json_crawler.navigate_pointer(concatcp!(SECTION_LIST_CONTINUATION, "/contents"))
+        {
+            parse_mixed_content(contents)?
+        } else {
+            Vec::new()
+        };
 
         Ok((HomeSections(sections), continuation_params))
     }
