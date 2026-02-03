@@ -14,10 +14,11 @@ use crate::common::{
 };
 use crate::parse::{
     AddPlaylistItem, GetAlbum, GetArtist, GetArtistAlbumsAlbum, GetPlaylistDetails, GetUser,
-    HistoryPeriod, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics, PlaylistItem,
-    SearchResultAlbum, SearchResultArtist, SearchResultEpisode, SearchResultFeaturedPlaylist,
-    SearchResultPlaylist, SearchResultPodcast, SearchResultProfile, SearchResultSong,
-    SearchResultVideo, SearchResults, UserPlaylist, UserVideo, WatchPlaylistTrack,
+    HistoryPeriod, HomeSections, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics,
+    PlaylistItem, SearchResultAlbum, SearchResultArtist, SearchResultEpisode,
+    SearchResultFeaturedPlaylist, SearchResultPlaylist, SearchResultPodcast, SearchResultProfile,
+    SearchResultSong, SearchResultVideo, SearchResults, UserPlaylist, UserVideo,
+    WatchPlaylistTrack,
 };
 use crate::query::playlist::{CreatePlaylistType, DuplicateHandlingMode, GetPlaylistDetailsQuery};
 use crate::query::rate::{RatePlaylistQuery, RateSongQuery};
@@ -31,15 +32,16 @@ use crate::query::{
     AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery,
     DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery,
     GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery,
-    GetEpisodeQuery, GetHistoryQuery, GetLibraryAlbumsQuery, GetLibraryArtistSubscriptionsQuery,
-    GetLibraryArtistsQuery, GetLibraryChannelsQuery, GetLibraryPlaylistsQuery,
-    GetLibraryPodcastsQuery, GetLibrarySongsQuery, GetLibraryUploadAlbumQuery,
-    GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery, GetLibraryUploadArtistsQuery,
-    GetLibraryUploadSongsQuery, GetLyricsIDQuery, GetMoodCategoriesQuery, GetMoodPlaylistsQuery,
-    GetNewEpisodesQuery, GetPlaylistTracksQuery, GetPodcastQuery, GetSearchSuggestionsQuery,
-    GetTasteProfileQuery, GetUserPlaylistsQuery, GetUserQuery, GetUserVideosQuery,
-    GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery, RemovePlaylistItemsQuery, SearchQuery,
-    SetTasteProfileQuery, SubscribeArtistQuery, UnsubscribeArtistsQuery,
+    GetEpisodeQuery, GetHistoryQuery, GetHomeQuery, GetLibraryAlbumsQuery,
+    GetLibraryArtistSubscriptionsQuery, GetLibraryArtistsQuery, GetLibraryChannelsQuery,
+    GetLibraryPlaylistsQuery, GetLibraryPodcastsQuery, GetLibrarySongsQuery,
+    GetLibraryUploadAlbumQuery, GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery,
+    GetLibraryUploadArtistsQuery, GetLibraryUploadSongsQuery, GetLyricsIDQuery,
+    GetMoodCategoriesQuery, GetMoodPlaylistsQuery, GetNewEpisodesQuery, GetPlaylistTracksQuery,
+    GetPodcastQuery, GetSearchSuggestionsQuery, GetTasteProfileQuery, GetUserPlaylistsQuery,
+    GetUserQuery, GetUserVideosQuery, GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery,
+    RemovePlaylistItemsQuery, SearchQuery, SetTasteProfileQuery, SubscribeArtistQuery,
+    UnsubscribeArtistsQuery,
 };
 use crate::{Result, YtMusic};
 
@@ -943,6 +945,34 @@ impl<A: LoggedIn> YtMusic<A> {
     pub async fn get_history(&self) -> Result<Vec<HistoryPeriod>> {
         let query = GetHistoryQuery;
         self.query(query).await
+    }
+    /// Gets the home page feed from YouTube Music.
+    /// ```no_run
+    /// # async {
+    /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
+    /// let home = yt.get_home(Some(10)).await.unwrap();
+    /// for section in home.iter() {
+    ///     println!("Section: {}", section.title);
+    /// }
+    /// # };
+    /// ```
+    pub async fn get_home(&self, limit: Option<usize>) -> Result<HomeSections> {
+        use futures::stream::StreamExt;
+        use std::pin::pin;
+
+        let limit = limit.unwrap_or(3);
+        let query = GetHomeQuery::default();
+        let mut stream = pin!(self.stream(&query));
+        let mut all_sections = HomeSections::default();
+
+        while let Some(result) = stream.next().await
+            && all_sections.len() < limit
+        {
+            let sections = result?;
+            all_sections.extend(sections);
+        }
+
+        Ok(all_sections)
     }
     /// Adds an item to the accounts history.
     /// ```no_run
