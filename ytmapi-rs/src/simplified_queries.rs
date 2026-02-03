@@ -13,7 +13,12 @@ use crate::common::{
     UploadArtistID, UploadEntityID, UserChannelID, UserPlaylistsParams, UserVideosParams, VideoID,
 };
 use crate::parse::{
-    AddPlaylistItem, GetAlbum, GetArtist, GetArtistAlbumsAlbum, GetPlaylistDetails, GetUser, HistoryPeriod, HomeSections, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics, PlaylistItem, SearchResultAlbum, SearchResultArtist, SearchResultEpisode, SearchResultFeaturedPlaylist, SearchResultPlaylist, SearchResultPodcast, SearchResultProfile, SearchResultSong, SearchResultVideo, SearchResults, UserPlaylist, UserVideo, WatchPlaylistTrack
+    AddPlaylistItem, GetAlbum, GetArtist, GetArtistAlbumsAlbum, GetPlaylistDetails, GetUser,
+    HistoryPeriod, HomeSections, LibraryArtist, LibraryArtistSubscription, LibraryPlaylist, Lyrics,
+    PlaylistItem, SearchResultAlbum, SearchResultArtist, SearchResultEpisode,
+    SearchResultFeaturedPlaylist, SearchResultPlaylist, SearchResultPodcast, SearchResultProfile,
+    SearchResultSong, SearchResultVideo, SearchResults, UserPlaylist, UserVideo,
+    WatchPlaylistTrack,
 };
 use crate::query::playlist::{CreatePlaylistType, DuplicateHandlingMode, GetPlaylistDetailsQuery};
 use crate::query::rate::{RatePlaylistQuery, RateSongQuery};
@@ -24,7 +29,19 @@ use crate::query::search::filteredsearch::{
 };
 use crate::query::song::{GetLyricsQuery, GetSongTrackingUrlQuery};
 use crate::query::{
-    AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery, DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery, GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery, GetEpisodeQuery, GetHistoryQuery, GetHomeQuery, GetLibraryAlbumsQuery, GetLibraryArtistSubscriptionsQuery, GetLibraryArtistsQuery, GetLibraryChannelsQuery, GetLibraryPlaylistsQuery, GetLibraryPodcastsQuery, GetLibrarySongsQuery, GetLibraryUploadAlbumQuery, GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery, GetLibraryUploadArtistsQuery, GetLibraryUploadSongsQuery, GetLyricsIDQuery, GetMoodCategoriesQuery, GetMoodPlaylistsQuery, GetNewEpisodesQuery, GetPlaylistTracksQuery, GetPodcastQuery, GetSearchSuggestionsQuery, GetTasteProfileQuery, GetUserPlaylistsQuery, GetUserQuery, GetUserVideosQuery, GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery, RemovePlaylistItemsQuery, SearchQuery, SetTasteProfileQuery, SubscribeArtistQuery, UnsubscribeArtistsQuery
+    AddHistoryItemQuery, AddPlaylistItemsQuery, CreatePlaylistQuery, DeletePlaylistQuery,
+    DeleteUploadEntityQuery, EditPlaylistQuery, EditSongLibraryStatusQuery, GetAlbumQuery,
+    GetArtistAlbumsQuery, GetArtistQuery, GetChannelEpisodesQuery, GetChannelQuery,
+    GetEpisodeQuery, GetHistoryQuery, GetHomeQuery, GetLibraryAlbumsQuery,
+    GetLibraryArtistSubscriptionsQuery, GetLibraryArtistsQuery, GetLibraryChannelsQuery,
+    GetLibraryPlaylistsQuery, GetLibraryPodcastsQuery, GetLibrarySongsQuery,
+    GetLibraryUploadAlbumQuery, GetLibraryUploadAlbumsQuery, GetLibraryUploadArtistQuery,
+    GetLibraryUploadArtistsQuery, GetLibraryUploadSongsQuery, GetLyricsIDQuery,
+    GetMoodCategoriesQuery, GetMoodPlaylistsQuery, GetNewEpisodesQuery, GetPlaylistTracksQuery,
+    GetPodcastQuery, GetSearchSuggestionsQuery, GetTasteProfileQuery, GetUserPlaylistsQuery,
+    GetUserQuery, GetUserVideosQuery, GetWatchPlaylistQuery, Query, RemoveHistoryItemsQuery,
+    RemovePlaylistItemsQuery, SearchQuery, SetTasteProfileQuery, SubscribeArtistQuery,
+    UnsubscribeArtistsQuery,
 };
 use crate::{Result, YtMusic};
 
@@ -930,19 +947,9 @@ impl<A: LoggedIn> YtMusic<A> {
         self.query(query).await
     }
     /// Gets the home page feed from YouTube Music.
-    /// The home page is structured as titled sections, returning music suggestions.
-    /// Content varies and may contain artist, album, song, playlist or video suggestions,
-    /// sometimes mixed within the same section.
-    ///
-    /// # Arguments
-    /// * `limit` - Maximum number of sections to return. If `None`, defaults to 3 sections.
-    ///   The method loads continuations until the limit is reached.
-    ///
-    /// # Example
     /// ```no_run
     /// # async {
     /// let yt = ytmapi_rs::YtMusic::from_cookie("FAKE COOKIE").await.unwrap();
-    /// // Get up to 10 sections from the home feed
     /// let home = yt.get_home(Some(10)).await.unwrap();
     /// for section in home.iter() {
     ///     println!("Section: {}", section.title);
@@ -958,17 +965,12 @@ impl<A: LoggedIn> YtMusic<A> {
         let mut stream = pin!(self.stream(&query));
         let mut all_sections = HomeSections::default();
 
-        while let Some(result) = stream.next().await {
+        while let Some(result) = stream.next().await
+            && all_sections.len() < limit
+        {
             let sections = result?;
             all_sections.extend(sections);
-
-            if all_sections.len() >= limit {
-                break;
-            }
         }
-
-        // Truncate to the requested limit
-        all_sections.truncate(limit);
 
         Ok(all_sections)
     }

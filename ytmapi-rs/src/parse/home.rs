@@ -11,8 +11,13 @@ use const_format::concatcp;
 use json_crawler::{JsonCrawler, JsonCrawlerOwned};
 use serde::{Deserialize, Serialize};
 
-/// Constant for section list continuation path
-const SECTION_LIST_CONTINUATION: &str = "/continuationContents/sectionListContinuation";
+/// Constant for appendContinuationItemsAction path (used for home feed continuations)
+const APPEND_CONTINUATION_ITEMS: &str =
+    "/onResponseReceivedActions/0/appendContinuationItemsAction/continuationItems";
+
+/// Path to get continuation token from continuationItemRenderer
+const CONTINUATION_ITEM_TOKEN: &str =
+    "/continuationItemRenderer/continuationEndpoint/continuationCommand/token";
 
 /// A collection of home sections returned from the home feed query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -184,17 +189,22 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
         let mut json_crawler: JsonCrawlerOwned = p.into();
 
-        // Navigate to section list continuation
-        let mut section_list = json_crawler.borrow_pointer(SECTION_LIST_CONTINUATION)?;
+        // Navigate to continuation items (home feed uses appendContinuationItemsAction)
+        let mut continuation_items = json_crawler.borrow_pointer(APPEND_CONTINUATION_ITEMS)?;
 
-        // Get continuation params if present
-        let continuation_params: Option<ContinuationParams<'static>> =
-            section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
+        // Try to get continuation params from the last item (continuationItemRenderer)
+        // The continuation token is in the last item of the array
+        let continuation_params: Option<ContinuationParams<'static>> = continuation_items
+            .try_iter_mut()
+            .ok()
+            .and_then(|mut iter| {
+                iter.last()
+                    .and_then(|mut last| last.take_value_pointer(CONTINUATION_ITEM_TOKEN).ok())
+            });
 
-        // Parse the sections from continuation
-        let sections = parse_mixed_content(
-            json_crawler.navigate_pointer(concatcp!(SECTION_LIST_CONTINUATION, "/contents"))?,
-        )?;
+        // Parse the sections from continuation items
+        let sections =
+            parse_mixed_content(json_crawler.navigate_pointer(APPEND_CONTINUATION_ITEMS)?)?;
 
         Ok((HomeSections(sections), continuation_params))
     }
