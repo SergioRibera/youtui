@@ -161,20 +161,18 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     fn parse_from_continuable(
         p: ProcessedResult<GetHomeQuery>,
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
-        let mut json_crawler: JsonCrawlerOwned = p.into();
+        let json_crawler: JsonCrawlerOwned = p.into();
 
-        // Navigate to section list
+        // Navigate to section list renderer (same pattern as other parsers)
         let mut section_list =
-            json_crawler.borrow_pointer(concatcp!(SINGLE_COLUMN_TAB, "/sectionListRenderer"))?;
+            json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, "/sectionListRenderer"))?;
 
-        // Get continuation params if present
+        // Get continuation params if present (must be done before navigating to contents)
         let continuation_params: Option<ContinuationParams<'static>> =
             section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
 
-        // Parse the sections
-        let sections = parse_mixed_content(
-            json_crawler.navigate_pointer(concatcp!(SINGLE_COLUMN_TAB, SECTION_LIST))?,
-        )?;
+        // Parse the sections from contents
+        let sections = parse_mixed_content(section_list.navigate_pointer("/contents")?)?;
 
         Ok((HomeSections(sections), continuation_params))
     }
@@ -182,12 +180,12 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     fn parse_continuation(
         p: ProcessedResult<GetContinuationsQuery<'_, GetHomeQuery>>,
     ) -> Result<(Self, Option<ContinuationParams<'static>>)> {
-        let mut json_crawler: JsonCrawlerOwned = p.into();
+        let json_crawler: JsonCrawlerOwned = p.into();
 
         // Try to navigate to section list continuation
         // If this path doesn't exist, return empty results (end of stream)
         // This matches Python's behavior: `if "continuationContents" in response`
-        let Ok(mut section_list) = json_crawler.borrow_pointer(SECTION_LIST_CONTINUATION) else {
+        let Ok(mut section_list) = json_crawler.navigate_pointer(SECTION_LIST_CONTINUATION) else {
             return Ok((HomeSections::default(), None));
         };
 
@@ -197,9 +195,7 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
 
         // Parse the sections from continuation contents
         // Python uses get_continuation_contents which looks for "contents" or "items"
-        let sections = if let Ok(contents) =
-            json_crawler.navigate_pointer(concatcp!(SECTION_LIST_CONTINUATION, "/contents"))
-        {
+        let sections = if let Ok(contents) = section_list.navigate_pointer("/contents") {
             parse_mixed_content(contents)?
         } else {
             Vec::new()
