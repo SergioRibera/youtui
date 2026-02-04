@@ -14,24 +14,54 @@ use serde::{Deserialize, Serialize};
 /// Path for section list continuation response
 const SECTION_LIST_CONTINUATION: &str = "/continuationContents/sectionListContinuation";
 
+/// Header path for carousel shelf
+const CAROUSEL_HEADER: &str = "/header/musicCarouselShelfBasicHeaderRenderer";
+
+/// A mood/category chip shown at the top of the home feed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HomeMoodChip {
+    pub title: String,
+    pub params: MoodCategoryParams<'static>,
+}
+
 /// A collection of home sections returned from the home feed query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct HomeSections(Vec<HomeSection>);
+pub struct HomeSections {
+    /// Mood/category chips shown at the top (e.g., "Energía", "Relax", "Fiesta")
+    pub chips: Vec<HomeMoodChip>,
+    /// The actual content sections
+    sections: Vec<HomeSection>,
+}
 
 impl HomeSections {
-    /// Creates a new `HomeSections` from a vector of sections.
-    pub fn new(sections: Vec<HomeSection>) -> Self {
-        Self(sections)
+    /// Creates a new `HomeSections` from chips and sections.
+    pub fn new(chips: Vec<HomeMoodChip>, sections: Vec<HomeSection>) -> Self {
+        Self { chips, sections }
+    }
+
+    /// Creates a new `HomeSections` with only sections (no chips).
+    pub fn from_sections(sections: Vec<HomeSection>) -> Self {
+        Self {
+            chips: Vec::new(),
+            sections,
+        }
     }
 
     /// Extends this collection with sections from another `HomeSections`.
+    /// Note: chips are only kept from the first response.
     pub fn extend(&mut self, other: HomeSections) {
-        self.0.extend(other.0);
+        self.sections.extend(other.sections);
     }
 
     /// Truncates the sections to the given length.
     pub fn truncate(&mut self, len: usize) {
-        self.0.truncate(len);
+        self.sections.truncate(len);
+    }
+
+    /// Returns a reference to the sections.
+    pub fn sections(&self) -> &[HomeSection] {
+        &self.sections
     }
 }
 
@@ -39,13 +69,13 @@ impl Deref for HomeSections {
     type Target = Vec<HomeSection>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.sections
     }
 }
 
 impl DerefMut for HomeSections {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.sections
     }
 }
 
@@ -54,7 +84,7 @@ impl IntoIterator for HomeSections {
     type IntoIter = std::vec::IntoIter<HomeSection>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.sections.into_iter()
     }
 }
 
@@ -63,7 +93,7 @@ impl<'a> IntoIterator for &'a HomeSections {
     type IntoIter = std::slice::Iter<'a, HomeSection>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        self.sections.iter()
     }
 }
 
@@ -71,7 +101,13 @@ impl<'a> IntoIterator for &'a HomeSections {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct HomeSection {
+    /// The main title of the section (e.g., "Vuelve a escucharlo")
     pub title: String,
+    /// Optional strapline text above the title (e.g., "SERGIO RIBERA")
+    pub strapline: Option<String>,
+    /// Optional thumbnail for the section header
+    pub thumbnail: Option<Thumbnail>,
+    /// The content items in this section
     pub contents: Vec<HomeContent>,
 }
 
@@ -99,6 +135,8 @@ pub struct HomeAlbum {
     pub artists: Vec<ParsedSongArtist>,
     pub explicit: Explicit,
     pub album_type: Option<String>,
+    /// Full subtitle text (localized, e.g., "Album • Artist • 2024")
+    pub subtitle: Option<String>,
 }
 
 /// A playlist shown on the home page.
@@ -111,6 +149,8 @@ pub struct HomePlaylist {
     pub description: Option<String>,
     pub count: Option<String>,
     pub author: Vec<ParsedSongArtist>,
+    /// Full subtitle text (localized, e.g., "Playlist • Author")
+    pub subtitle: Option<String>,
 }
 
 /// An artist shown on the home page.
@@ -121,6 +161,8 @@ pub struct HomeArtist {
     pub channel_id: ArtistChannelID<'static>,
     pub subscribers: Option<String>,
     pub thumbnails: Vec<Thumbnail>,
+    /// Full subtitle text (localized, e.g., "1.5M de suscriptores")
+    pub subtitle: Option<String>,
 }
 
 /// A song shown on the home page.
@@ -134,6 +176,8 @@ pub struct HomeSong {
     pub album: Option<ParsedSongAlbum>,
     pub explicit: Explicit,
     pub playlist_id: Option<PlaylistID<'static>>,
+    /// Full subtitle text (localized, e.g., "Canción • Artist • Album")
+    pub subtitle: Option<String>,
 }
 
 /// A video shown on the home page.
@@ -146,6 +190,8 @@ pub struct HomeVideo {
     pub thumbnails: Vec<Thumbnail>,
     pub views: Option<String>,
     pub playlist_id: Option<PlaylistID<'static>>,
+    /// Full subtitle text (localized, e.g., "Video • Artist • 1M de visualizaciones")
+    pub subtitle: Option<String>,
 }
 
 /// A watch playlist shown on the home page (auto-generated mixes).
@@ -155,6 +201,8 @@ pub struct HomeWatchPlaylist {
     pub title: String,
     pub playlist_id: PlaylistID<'static>,
     pub thumbnails: Vec<Thumbnail>,
+    /// Full subtitle text (localized)
+    pub subtitle: Option<String>,
 }
 
 impl ParseFromContinuable<GetHomeQuery> for HomeSections {
@@ -171,10 +219,11 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
         let continuation_params: Option<ContinuationParams<'static>> =
             section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
 
-        // Parse the sections from contents
-        let sections = parse_mixed_content(section_list.navigate_pointer("/contents")?)?;
+        // Parse mood chips and sections from contents
+        let contents = section_list.navigate_pointer("/contents")?;
+        let (chips, sections) = parse_home_contents(contents)?;
 
-        Ok((HomeSections(sections), continuation_params))
+        Ok((HomeSections::new(chips, sections), continuation_params))
     }
 
     fn parse_continuation(
@@ -194,48 +243,118 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
             section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
 
         // Parse the sections from continuation contents
-        // Python uses get_continuation_contents which looks for "contents" or "items"
+        // Continuation responses don't have chips, only sections
         let sections = if let Ok(contents) = section_list.navigate_pointer("/contents") {
             parse_mixed_content(contents)?
         } else {
             Vec::new()
         };
 
-        Ok((HomeSections(sections), continuation_params))
+        Ok((HomeSections::from_sections(sections), continuation_params))
     }
 }
 
-/// Parse mixed content sections from the home feed.
-/// This corresponds to the Python parse_mixed_content function.
+/// Parse home feed contents, extracting mood chips and sections.
+fn parse_home_contents(
+    mut contents: JsonCrawlerOwned,
+) -> Result<(Vec<HomeMoodChip>, Vec<HomeSection>)> {
+    let mut chips = Vec::new();
+    let mut sections = Vec::new();
+
+    for mut row in contents.try_iter_mut()? {
+        // Try to parse mood chips from chip cloud renderer
+        if row.path_exists("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
+            if let Ok(mut chip_cloud) = row.navigate_pointer("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
+                for mut chip in chip_cloud.try_iter_mut()? {
+                    if let Ok(chip) = parse_mood_chip(&mut chip) {
+                        chips.push(chip);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Try to get carousel shelf
+        if row.path_exists(CAROUSEL) {
+            if let Ok(carousel) = row.navigate_pointer(CAROUSEL) {
+                if let Some(section) = parse_carousel_section(carousel)? {
+                    sections.push(section);
+                }
+            }
+        }
+    }
+
+    Ok((chips, sections))
+}
+
+/// Parse a mood chip from the chip cloud.
+fn parse_mood_chip(chip: &mut impl JsonCrawler) -> Result<HomeMoodChip> {
+    let mut renderer = chip.borrow_pointer("/chipCloudChipRenderer")?;
+    let title: String = renderer.take_value_pointer("/text/runs/0/text")?;
+    let params: MoodCategoryParams<'static> = renderer.take_value_pointer(
+        "/navigationEndpoint/browseEndpoint/params",
+    )?;
+    Ok(HomeMoodChip { title, params })
+}
+
+/// Parse a carousel section with header info.
+fn parse_carousel_section(mut carousel: impl JsonCrawler) -> Result<Option<HomeSection>> {
+    // Skip if no contents
+    if !carousel.path_exists("/contents") {
+        return Ok(None);
+    }
+
+    // Try to get header info
+    let mut header = carousel.borrow_pointer(CAROUSEL_HEADER)?;
+
+    // Get title (required)
+    let title: String = header.take_value_pointer(concatcp!(TITLE, "/text"))?;
+
+    // Get optional strapline (text above title, e.g., "SERGIO RIBERA")
+    let strapline: Option<String> = header
+        .take_value_pointer("/strapline/runs/0/text")
+        .ok();
+
+    // Get optional thumbnail
+    let thumbnail: Option<Thumbnail> = header
+        .take_value_pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails/0")
+        .ok();
+
+    // Drop header borrow before navigating to contents
+    drop(header);
+
+    let mut contents = Vec::new();
+
+    // Parse each item in the carousel
+    for result in carousel.navigate_pointer("/contents")?.try_iter_mut()? {
+        if let Some(content) = parse_home_item(result)? {
+            contents.push(content);
+        }
+    }
+
+    if contents.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(HomeSection {
+        title,
+        strapline,
+        thumbnail,
+        contents,
+    }))
+}
+
+/// Parse mixed content sections from continuation response.
 fn parse_mixed_content(mut sections: JsonCrawlerOwned) -> Result<Vec<HomeSection>> {
     let mut items = Vec::new();
 
-    for row in sections.try_iter_mut()? {
+    for mut row in sections.try_iter_mut()? {
         // Try to get carousel shelf
-        if let Ok(mut carousel) = row.navigate_pointer(CAROUSEL) {
-            // Skip if no contents
-            if !carousel.path_exists("/contents") {
-                continue;
-            }
-
-            // Get title
-            let title: String = carousel.take_value_pointer(concatcp!(
-                "/header/musicCarouselShelfBasicHeaderRenderer",
-                TITLE,
-                "/text"
-            ))?;
-
-            let mut contents = Vec::new();
-
-            // Parse each item in the carousel
-            for result in carousel.navigate_pointer("/contents")?.try_iter_mut()? {
-                if let Some(content) = parse_home_item(result)? {
-                    contents.push(content);
+        if row.path_exists(CAROUSEL) {
+            if let Ok(carousel) = row.navigate_pointer(CAROUSEL) {
+                if let Some(section) = parse_carousel_section(carousel)? {
+                    items.push(section);
                 }
-            }
-
-            if !contents.is_empty() {
-                items.push(HomeSection { title, contents });
             }
         }
     }
@@ -326,11 +445,32 @@ fn parse_home_item(item: impl JsonCrawler) -> Result<Option<HomeContent>> {
     }
 }
 
+/// Get the full subtitle text from subtitle runs, joined together.
+fn get_full_subtitle(data: &mut impl JsonCrawler) -> Option<String> {
+    if let Ok(runs) = data.borrow_pointer(SUBTITLE_RUNS) {
+        let parts: Vec<String> = runs
+            .try_into_iter()
+            .ok()?
+            .filter_map(|mut r| r.take_value_pointer::<String>("/text").ok())
+            .collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(""))
+        }
+    } else {
+        None
+    }
+}
+
 /// Parse a home album from musicTwoRowItemRenderer.
 fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
     let title: String = data.take_value_pointer(TITLE_TEXT)?;
     let album_id: AlbumID<'static> = data.take_value_pointer(concatcp!(TITLE, NAVIGATION_BROWSE_ID))?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
+
+    // Get full subtitle for localized text
+    let subtitle = get_full_subtitle(&mut data);
 
     // Parse artists from subtitle runs
     let artists = parse_artists_from_subtitle_runs(&mut data)?;
@@ -359,6 +499,7 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
         artists,
         explicit,
         album_type,
+        subtitle,
     })
 }
 
@@ -369,17 +510,20 @@ fn parse_home_artist(mut data: impl JsonCrawler) -> Result<HomeArtist> {
         data.take_value_pointer(concatcp!(TITLE, NAVIGATION_BROWSE_ID))?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
+    // Get full subtitle for localized text (e.g., "1.5M de suscriptores")
+    let subtitle = get_full_subtitle(&mut data);
+
     // Subscribers from subtitle, extract just the number
-    let subscribers: Option<String> = data
-        .take_value_pointer::<String>(SUBTITLE)
-        .ok()
-        .map(|s| s.split(' ').next().unwrap_or(&s).to_string());
+    let subscribers: Option<String> = subtitle
+        .as_ref()
+        .map(|s| s.split(' ').next().unwrap_or(s).to_string());
 
     Ok(HomeArtist {
         title,
         channel_id,
         subscribers,
         thumbnails,
+        subtitle,
     })
 }
 
@@ -397,24 +541,11 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
 
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Parse description from subtitle runs
-    let description: Option<String> = if let Ok(mut subtitle) = data.borrow_pointer("/subtitle") {
-        if let Ok(runs) = subtitle.borrow_pointer("/runs") {
-            let desc = runs
-                .try_into_iter()?
-                .filter_map(|mut r| r.take_value_pointer::<String>("/text").ok())
-                .collect::<String>();
-            if desc.is_empty() {
-                None
-            } else {
-                Some(desc)
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    // Get full subtitle for localized text
+    let subtitle = get_full_subtitle(&mut data);
+
+    // Use subtitle as description (they're the same in this context)
+    let description = subtitle.clone();
 
     // Try to extract count from subtitle (e.g., "100 songs")
     let count: Option<String> = data
@@ -438,6 +569,7 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
         description,
         count,
         author,
+        subtitle,
     })
 }
 
@@ -446,6 +578,9 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
     let title: String = data.take_value_pointer(TITLE_TEXT)?;
     let video_id: VideoID<'static> = data.take_value_pointer(NAVIGATION_VIDEO_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
+
+    // Get full subtitle for localized text
+    let subtitle = get_full_subtitle(&mut data);
 
     // Parse artists from subtitle runs
     let artists = parse_song_artists_from_runs(&mut data)?;
@@ -472,6 +607,7 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
         album,
         explicit,
         playlist_id,
+        subtitle,
     })
 }
 
@@ -481,22 +617,22 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
     let video_id: VideoID<'static> = data.take_value_pointer(NAVIGATION_VIDEO_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
+    // Get full subtitle for localized text
+    let subtitle = get_full_subtitle(&mut data);
+
     // Parse artists from subtitle runs
     let artists = parse_song_artists_from_runs(&mut data)?;
 
-    // Get views from subtitle runs (usually the last item)
-    let views: Option<String> = data
-        .borrow_pointer(SUBTITLE_RUNS)
-        .ok()
-        .and_then(|mut runs| {
-            let items: Vec<String> = runs
-                .try_iter_mut()
-                .ok()?
-                .filter_map(|mut r| r.take_value_pointer::<String>("/text").ok())
-                .collect();
-            items.last().cloned()
-        })
-        .filter(|v| v.contains("views") || v.chars().any(|c| c.is_ascii_digit()));
+    // Get views from subtitle (usually the last part)
+    let views: Option<String> = subtitle
+        .as_ref()
+        .and_then(|s| {
+            // Find the last part that contains numbers or "views"
+            s.split(" • ")
+                .last()
+                .filter(|v| v.contains("views") || v.contains("visualizaciones") || v.chars().any(|c| c.is_ascii_digit()))
+                .map(|s| s.to_string())
+        });
 
     // Playlist ID if present
     let playlist_id: Option<PlaylistID<'static>> =
@@ -509,6 +645,7 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
         thumbnails,
         views,
         playlist_id,
+        subtitle,
     })
 }
 
@@ -518,10 +655,14 @@ fn parse_home_watch_playlist(mut data: impl JsonCrawler) -> Result<HomeWatchPlay
     let playlist_id: PlaylistID<'static> = data.take_value_pointer(NAVIGATION_WATCH_PLAYLIST_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
+    // Get full subtitle for localized text
+    let subtitle = get_full_subtitle(&mut data);
+
     Ok(HomeWatchPlaylist {
         title,
         playlist_id,
         thumbnails,
+        subtitle,
     })
 }
 
