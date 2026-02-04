@@ -261,7 +261,7 @@ fn parse_home_contents(
     let mut chips = Vec::new();
     let mut sections = Vec::new();
 
-    for mut row in contents.try_iter_mut()? {
+    for row in contents.try_iter_mut()? {
         // Try to parse mood chips from chip cloud renderer
         if row.path_exists("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
             if let Ok(mut chip_cloud) = row.navigate_pointer("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
@@ -348,7 +348,7 @@ fn parse_carousel_section(mut carousel: impl JsonCrawler) -> Result<Option<HomeS
 fn parse_mixed_content(mut sections: JsonCrawlerOwned) -> Result<Vec<HomeSection>> {
     let mut items = Vec::new();
 
-    for mut row in sections.try_iter_mut()? {
+    for row in sections.try_iter_mut()? {
         // Try to get carousel shelf
         if row.path_exists(CAROUSEL) {
             if let Ok(carousel) = row.navigate_pointer(CAROUSEL) {
@@ -677,7 +677,10 @@ fn parse_artists_from_subtitle_runs(data: &mut impl JsonCrawler) -> Result<Vec<P
                 continue;
             }
 
-            let text: String = run.take_value_pointer("/text")?;
+            // Skip if text is null or missing
+            let Some(text) = run.take_value_pointer::<String>("/text").ok() else {
+                continue;
+            };
 
             // Skip type specifiers like "Album", "Single", "Song", etc.
             if text == "Album"
@@ -717,7 +720,10 @@ fn parse_song_artists_from_runs(data: &mut impl JsonCrawler) -> Result<Vec<Parse
                 continue;
             }
 
-            let text: String = run.take_value_pointer("/text")?;
+            // Skip if text is null or missing
+            let Some(text) = run.take_value_pointer::<String>("/text").ok() else {
+                continue;
+            };
 
             // Skip type specifiers
             if text == "Song" || text == "Video" {
@@ -757,7 +763,10 @@ fn parse_album_from_subtitle_runs(data: &mut impl JsonCrawler) -> Result<Option<
             if let Some(id) = browse_id {
                 // Check if this is an album (browse ID starts with "MPRE")
                 if id.starts_with("MPRE") {
-                    let name: String = run.take_value_pointer("/text")?;
+                    // Skip if text is null or missing
+                    let Some(name) = run.take_value_pointer::<String>("/text").ok() else {
+                        continue;
+                    };
                     return Ok(Some(ParsedSongAlbum {
                         name,
                         id: AlbumID::from_raw(id),
