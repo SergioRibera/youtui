@@ -254,6 +254,13 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     }
 }
 
+/// Possible paths for chip cloud in home feed
+const CHIP_CLOUD_PATHS: &[&str] = &[
+    "/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips",
+    "/header/chipCloudRenderer/chips",
+    "/chipCloudRenderer/chips",
+];
+
 /// Parse home feed contents, extracting mood chips and sections.
 fn parse_home_contents(
     mut contents: JsonCrawlerOwned,
@@ -262,20 +269,21 @@ fn parse_home_contents(
     let mut sections = Vec::new();
 
     for row in contents.try_iter_mut()? {
-        // Try to parse mood chips from chip cloud renderer
-        if row.path_exists("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
-            if let Ok(mut chip_cloud) = row.navigate_pointer("/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips") {
+        // First, determine what type of content this row contains
+        // Check for chip cloud paths
+        let chip_path = CHIP_CLOUD_PATHS.iter().find(|p| row.path_exists(p));
+
+        if let Some(&path) = chip_path {
+            // This row contains chips
+            if let Ok(mut chip_cloud) = row.navigate_pointer(path) {
                 for mut chip in chip_cloud.try_iter_mut()? {
                     if let Ok(chip) = parse_mood_chip(&mut chip) {
                         chips.push(chip);
                     }
                 }
             }
-            continue;
-        }
-
-        // Try to get carousel shelf
-        if row.path_exists(CAROUSEL) {
+        } else if row.path_exists(CAROUSEL) {
+            // This row contains a carousel
             if let Ok(carousel) = row.navigate_pointer(CAROUSEL) {
                 if let Some(section) = parse_carousel_section(carousel)? {
                     sections.push(section);
@@ -469,12 +477,6 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
     let album_id: AlbumID<'static> = data.take_value_pointer(concatcp!(TITLE, NAVIGATION_BROWSE_ID))?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text
-    let subtitle = get_full_subtitle(&mut data);
-
-    // Parse artists from subtitle runs
-    let artists = parse_artists_from_subtitle_runs(&mut data)?;
-
     // Try to get year from subtitle (usually at position 2 or 4)
     let year: Option<String> = data
         .take_value_pointer(SUBTITLE2)
@@ -490,6 +492,12 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
 
     // Album type from subtitle
     let album_type: Option<String> = data.take_value_pointer(SUBTITLE).ok();
+
+    // Parse artists from subtitle runs
+    let artists = parse_artists_from_subtitle_runs(&mut data)?;
+
+    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
+    let subtitle = get_full_subtitle(&mut data);
 
     Ok(HomeAlbum {
         title,
@@ -541,12 +549,6 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
 
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text
-    let subtitle = get_full_subtitle(&mut data);
-
-    // Use subtitle as description (they're the same in this context)
-    let description = subtitle.clone();
-
     // Try to extract count from subtitle (e.g., "100 songs")
     let count: Option<String> = data
         .take_value_pointer::<String>(SUBTITLE2)
@@ -561,6 +563,12 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
 
     // Parse author from subtitle runs
     let author = parse_artists_from_subtitle_runs(&mut data).unwrap_or_default();
+
+    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
+    let subtitle = get_full_subtitle(&mut data);
+
+    // Use subtitle as description (they're the same in this context)
+    let description = subtitle.clone();
 
     Ok(HomePlaylist {
         title,
@@ -579,15 +587,6 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
     let video_id: VideoID<'static> = data.take_value_pointer(NAVIGATION_VIDEO_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text
-    let subtitle = get_full_subtitle(&mut data);
-
-    // Parse artists from subtitle runs
-    let artists = parse_song_artists_from_runs(&mut data)?;
-
-    // Try to get album from subtitle runs
-    let album: Option<ParsedSongAlbum> = parse_album_from_subtitle_runs(&mut data)?;
-
     // Check if explicit
     let explicit = if data.path_exists(SUBTITLE_BADGE_LABEL) {
         Explicit::IsExplicit
@@ -598,6 +597,15 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
     // Playlist ID if present
     let playlist_id: Option<PlaylistID<'static>> =
         data.take_value_pointer(NAVIGATION_PLAYLIST_ID).ok();
+
+    // Parse artists from subtitle runs
+    let artists = parse_song_artists_from_runs(&mut data)?;
+
+    // Try to get album from subtitle runs
+    let album: Option<ParsedSongAlbum> = parse_album_from_subtitle_runs(&mut data)?;
+
+    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
+    let subtitle = get_full_subtitle(&mut data);
 
     Ok(HomeSong {
         title,
@@ -617,11 +625,15 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
     let video_id: VideoID<'static> = data.take_value_pointer(NAVIGATION_VIDEO_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text
-    let subtitle = get_full_subtitle(&mut data);
+    // Playlist ID if present
+    let playlist_id: Option<PlaylistID<'static>> =
+        data.take_value_pointer(NAVIGATION_PLAYLIST_ID).ok();
 
     // Parse artists from subtitle runs
     let artists = parse_song_artists_from_runs(&mut data)?;
+
+    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
+    let subtitle = get_full_subtitle(&mut data);
 
     // Get views from subtitle (usually the last part)
     let views: Option<String> = subtitle
@@ -633,10 +645,6 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
                 .filter(|v| v.contains("views") || v.contains("visualizaciones") || v.chars().any(|c| c.is_ascii_digit()))
                 .map(|s| s.to_string())
         });
-
-    // Playlist ID if present
-    let playlist_id: Option<PlaylistID<'static>> =
-        data.take_value_pointer(NAVIGATION_PLAYLIST_ID).ok();
 
     Ok(HomeVideo {
         title,
