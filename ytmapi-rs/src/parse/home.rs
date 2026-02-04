@@ -219,9 +219,12 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
         let continuation_params: Option<ContinuationParams<'static>> =
             section_list.take_value_pointer(CONTINUATION_PARAMS).ok();
 
-        // Parse mood chips and sections from contents
+        // Parse mood chips from header (chips are in sectionListRenderer/header/chipCloudRenderer/chips)
+        let chips = parse_header_chips(&mut section_list)?;
+
+        // Parse sections from contents
         let contents = section_list.navigate_pointer("/contents")?;
-        let (chips, sections) = parse_home_contents(contents)?;
+        let sections = parse_home_sections(contents)?;
 
         Ok((HomeSections::new(chips, sections), continuation_params))
     }
@@ -254,36 +257,29 @@ impl ParseFromContinuable<GetHomeQuery> for HomeSections {
     }
 }
 
-/// Possible paths for chip cloud in home feed
-const CHIP_CLOUD_PATHS: &[&str] = &[
-    "/musicImmersiveHeaderRenderer/chipCloud/chipCloudRenderer/chips",
-    "/header/chipCloudRenderer/chips",
-    "/chipCloudRenderer/chips",
-];
-
-/// Parse home feed contents, extracting mood chips and sections.
-fn parse_home_contents(
-    mut contents: JsonCrawlerOwned,
-) -> Result<(Vec<HomeMoodChip>, Vec<HomeSection>)> {
+/// Parse mood chips from the sectionListRenderer header.
+fn parse_header_chips(section_list: &mut impl JsonCrawler) -> Result<Vec<HomeMoodChip>> {
     let mut chips = Vec::new();
+
+    // Chips are in header/chipCloudRenderer/chips
+    if let Ok(mut chip_cloud) = section_list.borrow_pointer("/header/chipCloudRenderer/chips") {
+        for mut chip in chip_cloud.try_iter_mut()? {
+            if let Ok(parsed_chip) = parse_mood_chip(&mut chip) {
+                chips.push(parsed_chip);
+            }
+        }
+    }
+
+    Ok(chips)
+}
+
+/// Parse home feed sections from contents.
+fn parse_home_sections(mut contents: JsonCrawlerOwned) -> Result<Vec<HomeSection>> {
     let mut sections = Vec::new();
 
     for row in contents.try_iter_mut()? {
-        // First, determine what type of content this row contains
-        // Check for chip cloud paths
-        let chip_path = CHIP_CLOUD_PATHS.iter().find(|p| row.path_exists(p));
-
-        if let Some(&path) = chip_path {
-            // This row contains chips
-            if let Ok(mut chip_cloud) = row.navigate_pointer(path) {
-                for mut chip in chip_cloud.try_iter_mut()? {
-                    if let Ok(chip) = parse_mood_chip(&mut chip) {
-                        chips.push(chip);
-                    }
-                }
-            }
-        } else if row.path_exists(CAROUSEL) {
-            // This row contains a carousel
+        // Try to get carousel shelf
+        if row.path_exists(CAROUSEL) {
             if let Ok(carousel) = row.navigate_pointer(CAROUSEL) {
                 if let Some(section) = parse_carousel_section(carousel)? {
                     sections.push(section);
@@ -292,7 +288,7 @@ fn parse_home_contents(
         }
     }
 
-    Ok((chips, sections))
+    Ok(sections)
 }
 
 /// Parse a mood chip from the chip cloud.
@@ -453,21 +449,56 @@ fn parse_home_item(item: impl JsonCrawler) -> Result<Option<HomeContent>> {
     }
 }
 
-/// Get the full subtitle text from subtitle runs, joined together.
-fn get_full_subtitle(data: &mut impl JsonCrawler) -> Option<String> {
-    if let Ok(runs) = data.borrow_pointer(SUBTITLE_RUNS) {
-        let parts: Vec<String> = runs
-            .try_into_iter()
-            .ok()?
-            .filter_map(|mut r| r.take_value_pointer::<String>("/text").ok())
-            .collect();
-        if parts.is_empty() {
+/// Parsed subtitle information containing all extracted data.
+struct ParsedSubtitle {
+    /// Full subtitle text joined together
+    full_text: Option<String>,
+    /// Individual text parts (even indices only, excluding separators)
+    parts: Vec<SubtitlePart>,
+}
+
+/// A single part from the subtitle runs.
+struct SubtitlePart {
+    text: String,
+    browse_id: Option<String>,
+}
+
+/// Parse all subtitle information in one pass.
+/// This extracts the full text and structured parts before the data is consumed.
+fn parse_subtitle_data(data: &mut impl JsonCrawler) -> ParsedSubtitle {
+    let mut full_parts: Vec<String> = Vec::new();
+    let mut structured_parts: Vec<SubtitlePart> = Vec::new();
+
+    if let Ok(mut runs) = data.borrow_pointer(SUBTITLE_RUNS) {
+        if let Ok(iter) = runs.try_iter_mut() {
+            for (i, mut run) in iter.enumerate() {
+                // Get text (might be null)
+                let text: Option<String> = run.take_value_pointer("/text").ok();
+
+                if let Some(ref t) = text {
+                    full_parts.push(t.clone());
+
+                    // Only collect even indices (skip separators like " • ")
+                    if i % 2 == 0 {
+                        let browse_id: Option<String> =
+                            run.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
+                        structured_parts.push(SubtitlePart {
+                            text: t.clone(),
+                            browse_id,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    ParsedSubtitle {
+        full_text: if full_parts.is_empty() {
             None
         } else {
-            Some(parts.join(""))
-        }
-    } else {
-        None
+            Some(full_parts.join(""))
+        },
+        parts: structured_parts,
     }
 }
 
@@ -477,12 +508,6 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
     let album_id: AlbumID<'static> = data.take_value_pointer(concatcp!(TITLE, NAVIGATION_BROWSE_ID))?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Try to get year from subtitle (usually at position 2 or 4)
-    let year: Option<String> = data
-        .take_value_pointer(SUBTITLE2)
-        .ok()
-        .filter(|y: &String| y.chars().all(|c| c.is_ascii_digit()) && y.len() == 4);
-
     // Check if explicit
     let explicit = if data.path_exists(SUBTITLE_BADGE_LABEL) {
         Explicit::IsExplicit
@@ -490,14 +515,35 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
         Explicit::NotExplicit
     };
 
-    // Album type from subtitle
-    let album_type: Option<String> = data.take_value_pointer(SUBTITLE).ok();
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
-    // Parse artists from subtitle runs
-    let artists = parse_artists_from_subtitle_runs(&mut data)?;
+    // Extract album type (first part, e.g., "Album", "Single", "EP")
+    let album_type = subtitle_data.parts.first().map(|p| p.text.clone());
 
-    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
-    let subtitle = get_full_subtitle(&mut data);
+    // Extract year (4-digit number)
+    let year = subtitle_data
+        .parts
+        .iter()
+        .find(|p| p.text.len() == 4 && p.text.chars().all(|c| c.is_ascii_digit()))
+        .map(|p| p.text.clone());
+
+    // Extract artists (parts with browse IDs that are artist channels, not albums)
+    let artists: Vec<ParsedSongArtist> = subtitle_data
+        .parts
+        .iter()
+        .filter(|p| {
+            // Skip type specifiers and years
+            !matches!(p.text.as_str(), "Album" | "Single" | "EP" | "Song" | "Video")
+                && !(p.text.len() == 4 && p.text.chars().all(|c| c.is_ascii_digit()))
+                // Skip album references (browse ID starts with "MPRE")
+                && !p.browse_id.as_ref().map(|id| id.starts_with("MPRE")).unwrap_or(false)
+        })
+        .map(|p| ParsedSongArtist {
+            name: p.text.clone(),
+            id: p.browse_id.as_ref().map(|id| ArtistChannelID::from_raw(id.clone())),
+        })
+        .collect();
 
     Ok(HomeAlbum {
         title,
@@ -507,7 +553,7 @@ fn parse_home_album(mut data: impl JsonCrawler) -> Result<HomeAlbum> {
         artists,
         explicit,
         album_type,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
 }
 
@@ -518,11 +564,12 @@ fn parse_home_artist(mut data: impl JsonCrawler) -> Result<HomeArtist> {
         data.take_value_pointer(concatcp!(TITLE, NAVIGATION_BROWSE_ID))?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text (e.g., "1.5M de suscriptores")
-    let subtitle = get_full_subtitle(&mut data);
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
     // Subscribers from subtitle, extract just the number
-    let subscribers: Option<String> = subtitle
+    let subscribers: Option<String> = subtitle_data
+        .full_text
         .as_ref()
         .map(|s| s.split(' ').next().unwrap_or(s).to_string());
 
@@ -531,7 +578,7 @@ fn parse_home_artist(mut data: impl JsonCrawler) -> Result<HomeArtist> {
         channel_id,
         subscribers,
         thumbnails,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
 }
 
@@ -549,26 +596,30 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
 
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Try to extract count from subtitle (e.g., "100 songs")
-    let count: Option<String> = data
-        .take_value_pointer::<String>(SUBTITLE2)
-        .ok()
-        .and_then(|s| {
-            if s.chars().any(|c| c.is_ascii_digit()) {
-                Some(s.split(' ').next().unwrap_or(&s).to_string())
-            } else {
-                None
-            }
-        });
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
-    // Parse author from subtitle runs
-    let author = parse_artists_from_subtitle_runs(&mut data).unwrap_or_default();
+    // Try to extract count from subtitle parts (e.g., "100 songs")
+    let count: Option<String> = subtitle_data
+        .parts
+        .iter()
+        .find(|p| p.text.chars().any(|c| c.is_ascii_digit()))
+        .map(|p| p.text.split(' ').next().unwrap_or(&p.text).to_string());
 
-    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
-    let subtitle = get_full_subtitle(&mut data);
+    // Extract authors (parts with browse IDs, skipping first part which is usually "Playlist")
+    let author: Vec<ParsedSongArtist> = subtitle_data
+        .parts
+        .iter()
+        .skip(1) // Skip "Playlist" type
+        .filter(|p| !p.text.chars().any(|c| c.is_ascii_digit())) // Skip counts
+        .map(|p| ParsedSongArtist {
+            name: p.text.clone(),
+            id: p.browse_id.as_ref().map(|id| ArtistChannelID::from_raw(id.clone())),
+        })
+        .collect();
 
-    // Use subtitle as description (they're the same in this context)
-    let description = subtitle.clone();
+    // Use full subtitle as description
+    let description = subtitle_data.full_text.clone();
 
     Ok(HomePlaylist {
         title,
@@ -577,7 +628,7 @@ fn parse_home_playlist(mut data: impl JsonCrawler) -> Result<HomePlaylist> {
         description,
         count,
         author,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
 }
 
@@ -598,14 +649,36 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
     let playlist_id: Option<PlaylistID<'static>> =
         data.take_value_pointer(NAVIGATION_PLAYLIST_ID).ok();
 
-    // Parse artists from subtitle runs
-    let artists = parse_song_artists_from_runs(&mut data)?;
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
-    // Try to get album from subtitle runs
-    let album: Option<ParsedSongAlbum> = parse_album_from_subtitle_runs(&mut data)?;
+    // Extract artists (parts with artist channel IDs, not albums)
+    let artists: Vec<ParsedSongArtist> = subtitle_data
+        .parts
+        .iter()
+        .filter(|p| {
+            // Skip type specifiers
+            !matches!(p.text.as_str(), "Song" | "Video")
+                // Skip views count
+                && !p.text.contains("views") && !p.text.contains("visualizaciones")
+                // Skip album references (browse ID starts with "MPRE")
+                && !p.browse_id.as_ref().map(|id| id.starts_with("MPRE")).unwrap_or(false)
+        })
+        .map(|p| ParsedSongArtist {
+            name: p.text.clone(),
+            id: p.browse_id.as_ref().map(|id| ArtistChannelID::from_raw(id.clone())),
+        })
+        .collect();
 
-    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
-    let subtitle = get_full_subtitle(&mut data);
+    // Extract album (part with browse ID starting with "MPRE")
+    let album: Option<ParsedSongAlbum> = subtitle_data
+        .parts
+        .iter()
+        .find(|p| p.browse_id.as_ref().map(|id| id.starts_with("MPRE")).unwrap_or(false))
+        .map(|p| ParsedSongAlbum {
+            name: p.text.clone(),
+            id: AlbumID::from_raw(p.browse_id.clone().unwrap()),
+        });
 
     Ok(HomeSong {
         title,
@@ -615,7 +688,7 @@ fn parse_home_song(mut data: impl JsonCrawler) -> Result<HomeSong> {
         album,
         explicit,
         playlist_id,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
 }
 
@@ -629,22 +702,32 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
     let playlist_id: Option<PlaylistID<'static>> =
         data.take_value_pointer(NAVIGATION_PLAYLIST_ID).ok();
 
-    // Parse artists from subtitle runs
-    let artists = parse_song_artists_from_runs(&mut data)?;
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
-    // Get full subtitle for localized text (MUST be called last as it consumes subtitle runs)
-    let subtitle = get_full_subtitle(&mut data);
+    // Extract artists (parts that are not type specifiers or view counts)
+    let artists: Vec<ParsedSongArtist> = subtitle_data
+        .parts
+        .iter()
+        .filter(|p| {
+            // Skip type specifiers
+            !matches!(p.text.as_str(), "Song" | "Video")
+                // Skip views count
+                && !p.text.contains("views") && !p.text.contains("visualizaciones")
+                && !p.text.chars().any(|c| c.is_ascii_digit())
+        })
+        .map(|p| ParsedSongArtist {
+            name: p.text.clone(),
+            id: p.browse_id.as_ref().map(|id| ArtistChannelID::from_raw(id.clone())),
+        })
+        .collect();
 
-    // Get views from subtitle (usually the last part)
-    let views: Option<String> = subtitle
-        .as_ref()
-        .and_then(|s| {
-            // Find the last part that contains numbers or "views"
-            s.split(" • ")
-                .last()
-                .filter(|v| v.contains("views") || v.contains("visualizaciones") || v.chars().any(|c| c.is_ascii_digit()))
-                .map(|s| s.to_string())
-        });
+    // Get views from subtitle parts (contains numbers or "views")
+    let views: Option<String> = subtitle_data
+        .parts
+        .iter()
+        .find(|p| p.text.contains("views") || p.text.contains("visualizaciones") || p.text.chars().any(|c| c.is_ascii_digit()))
+        .map(|p| p.text.clone());
 
     Ok(HomeVideo {
         title,
@@ -653,7 +736,7 @@ fn parse_home_video(mut data: impl JsonCrawler) -> Result<HomeVideo> {
         thumbnails,
         views,
         playlist_id,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
 }
 
@@ -663,128 +746,15 @@ fn parse_home_watch_playlist(mut data: impl JsonCrawler) -> Result<HomeWatchPlay
     let playlist_id: PlaylistID<'static> = data.take_value_pointer(NAVIGATION_WATCH_PLAYLIST_ID)?;
     let thumbnails: Vec<Thumbnail> = data.take_value_pointer(THUMBNAIL_RENDERER)?;
 
-    // Get full subtitle for localized text
-    let subtitle = get_full_subtitle(&mut data);
+    // Parse all subtitle data in one pass
+    let subtitle_data = parse_subtitle_data(&mut data);
 
     Ok(HomeWatchPlaylist {
         title,
         playlist_id,
         thumbnails,
-        subtitle,
+        subtitle: subtitle_data.full_text,
     })
-}
-
-/// Parse artists from subtitle runs, skipping type specifiers and separators.
-fn parse_artists_from_subtitle_runs(data: &mut impl JsonCrawler) -> Result<Vec<ParsedSongArtist>> {
-    let mut artists = Vec::new();
-
-    if let Ok(mut runs) = data.borrow_pointer(SUBTITLE_RUNS) {
-        for (i, mut run) in runs.try_iter_mut()?.enumerate() {
-            // Skip separators (odd indices)
-            if i % 2 != 0 {
-                continue;
-            }
-
-            // Skip if text is null or missing
-            let Some(text) = run.take_value_pointer::<String>("/text").ok() else {
-                continue;
-            };
-
-            // Skip type specifiers like "Album", "Single", "Song", etc.
-            if text == "Album"
-                || text == "Single"
-                || text == "EP"
-                || text == "Song"
-                || text == "Video"
-            {
-                continue;
-            }
-
-            // Skip if it looks like a year
-            if text.len() == 4 && text.chars().all(|c| c.is_ascii_digit()) {
-                continue;
-            }
-
-            let id: Option<ArtistChannelID<'static>> =
-                run.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
-
-            artists.push(ParsedSongArtist { name: text, id });
-        }
-    }
-
-    Ok(artists)
-}
-
-/// Parse song artists from subtitle runs.
-fn parse_song_artists_from_runs(data: &mut impl JsonCrawler) -> Result<Vec<ParsedSongArtist>> {
-    let mut artists = Vec::new();
-
-    if let Ok(mut runs) = data.borrow_pointer(SUBTITLE_RUNS) {
-        let items: Vec<_> = runs.try_iter_mut()?.collect();
-
-        for (i, mut run) in items.into_iter().enumerate() {
-            // Skip separators (odd indices)
-            if i % 2 != 0 {
-                continue;
-            }
-
-            // Skip if text is null or missing
-            let Some(text) = run.take_value_pointer::<String>("/text").ok() else {
-                continue;
-            };
-
-            // Skip type specifiers
-            if text == "Song" || text == "Video" {
-                continue;
-            }
-
-            // Skip views count (usually last item)
-            if text.contains("views") {
-                continue;
-            }
-
-            // Check if this is an artist (has navigation endpoint or is not the last element)
-            let id: Option<ArtistChannelID<'static>> =
-                run.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
-
-            // If it's an album reference (has browse ID starting with "MPRE"), skip as artist
-            if let Some(ref browse_id) = id {
-                if browse_id.get_raw().starts_with("MPRE") {
-                    continue;
-                }
-            }
-
-            artists.push(ParsedSongArtist { name: text, id });
-        }
-    }
-
-    Ok(artists)
-}
-
-/// Parse album reference from subtitle runs.
-/// Returns None if no album is found.
-fn parse_album_from_subtitle_runs(data: &mut impl JsonCrawler) -> Result<Option<ParsedSongAlbum>> {
-    if let Ok(mut runs) = data.borrow_pointer(SUBTITLE_RUNS) {
-        for mut run in runs.try_iter_mut()? {
-            let browse_id: Option<String> = run.take_value_pointer(NAVIGATION_BROWSE_ID).ok();
-
-            if let Some(id) = browse_id {
-                // Check if this is an album (browse ID starts with "MPRE")
-                if id.starts_with("MPRE") {
-                    // Skip if text is null or missing
-                    let Some(name) = run.take_value_pointer::<String>("/text").ok() else {
-                        continue;
-                    };
-                    return Ok(Some(ParsedSongAlbum {
-                        name,
-                        id: AlbumID::from_raw(id),
-                    }));
-                }
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 #[cfg(test)]
